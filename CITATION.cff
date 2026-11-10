@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this tool, please cite it as below."
+title: "SEG-Y Cropper"
+version: "1.0"
+date-released: "2026-11-10"
+license: CC-BY-SA-4.0
+authors:
+  - family-names: "Moreno-Ward"
+    given-names: "April"
+    affiliation: "University of Oklahoma"
+  - family-names: "Bedle"
+    given-names: "Heather"
+    affiliation: "University of Oklahoma"
+keywords:
+  - SEG-Y
+  - seismic
+  - geophysics
+  - teaching

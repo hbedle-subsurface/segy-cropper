@@ -1,0 +1,20 @@
+SEG-Y Cropper
+Copyright (c) 2026 April Moreno-Ward and Heather Bedle, University of Oklahoma
+
+This work is licensed under the Creative Commons Attribution-ShareAlike 4.0
+International License (CC BY-SA 4.0):
+https://creativecommons.org/licenses/by-sa/4.0/
+Full legal text: https://creativecommons.org/licenses/by-sa/4.0/legalcode
+
+Free to use, including in teaching and research. If you use it in a course,
+a talk, or a publication, please credit the tool and link back to it. Under
+this license you may also adapt and share it, provided the source is
+credited and any adaptation is released under the same license.
+
+To cite: A. Moreno-Ward and H. Bedle, 2026, SEG-Y Cropper (version 1.0)
+[DOI to follow].
+
+The page contains no third-party code. assets/count.js (page-open counter,
+Heather Bedle) loads GoatCounter's counting script from gc.zgo.at when the
+page is opened from the website; it is not part of this licence's subject
+matter and can be removed without affecting the tool.

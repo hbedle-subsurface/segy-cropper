@@ -1,0 +1,765 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://gc.zgo.at; connect-src 'self' https://hbedle.goatcounter.com; img-src 'self' data: blob: https://hbedle.goatcounter.com; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta name="description" content="Crop SEG-Y volumes in the browser: view inlines, crosslines and time slices, draw a crop, and save cropped SEG-Y files. Nothing is uploaded.">
+<title>SEG-Y Cropper</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --fg: #1d2330; --muted: #5b6475;
+    --line: #dde2ea; --accent: #0a7f45; --accent-fg: #ffffff; --warn: #a15c00;
+    --bad: #b3261e; --input: #ffffff; --crop: #ffb000;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d0f17; --panel: #161925; --fg: #e6e8f0; --muted: #a3a9bb;
+      --line: #2a2e42; --accent: #00b86b; --accent-fg: #06110b; --warn: #f2c063;
+      --bad: #ff7a70; --input: #1d2132; --crop: #ffc94a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d0f17; --panel: #161925; --fg: #e6e8f0; --muted: #a3a9bb;
+    --line: #2a2e42; --accent: #00b86b; --accent-fg: #06110b; --warn: #f2c063;
+    --bad: #ff7a70; --input: #1d2132; --crop: #ffc94a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { margin: 0; font-size: 1.15rem; }
+  header p { margin: 2px 0 0; color: var(--muted); font-size: .9em; }
+  .wrap { display: grid; grid-template-columns: 330px 1fr; gap: 14px; padding: 14px 16px; }
+  @media (max-width: 860px) { .wrap { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  .panel + .panel { margin-top: 12px; }
+  h2 { font-size: .95rem; margin: 0 0 8px; }
+  label { display: block; color: var(--muted); font-size: .85em; margin: 6px 0 2px; }
+  input[type=number], select { width: 100%; padding: 5px 7px; border: 1px solid var(--line);
+         border-radius: 5px; background: var(--input); color: var(--fg); font: inherit; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .row3 { display: grid; grid-template-columns: auto 1fr 1fr; gap: 6px; align-items: center; }
+  .row3 span { color: var(--muted); font-size: .85em; min-width: 70px; }
+  button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line);
+           background: var(--input); color: var(--fg); cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  .seg { display: flex; gap: 0; margin: 4px 0 8px; }
+  .seg button { border-radius: 0; flex: 1; }
+  .seg button:first-child { border-radius: 6px 0 0 6px; }
+  .seg button:last-child { border-radius: 0 6px 6px 0; }
+  .seg button.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  .files { list-style: none; padding: 0; margin: 6px 0 0; }
+  .files li { display: flex; gap: 6px; align-items: center; padding: 4px 0;
+              border-bottom: 1px solid var(--line); font-size: .88em; overflow-wrap: anywhere; }
+  .files li.active { font-weight: 600; }
+  .files li .st { color: var(--muted); margin-left: auto; white-space: nowrap; }
+  .muted { color: var(--muted); font-size: .86em; }
+  .ok { color: var(--accent); font-weight: 600; }
+  .warn { color: var(--warn); font-weight: 600; }
+  .bad { color: var(--bad); font-weight: 600; }
+  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 6px; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+  .viewer { min-width: 0; }
+  .vhead { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 8px; }
+  .vhead .seg { margin: 0; min-width: 260px; }
+  .vhead input[type=range] { flex: 1; min-width: 160px; }
+  #posLabel { min-width: 120px; font-variant-numeric: tabular-nums; }
+  canvas { display: block; width: 100%; background: var(--panel); border: 1px solid var(--line);
+           border-radius: 8px; cursor: crosshair; touch-action: none; }
+  .note { margin-top: 6px; }
+  .size { font-size: 1.05em; }
+  .chk { display: flex; gap: 6px; align-items: center; color: var(--fg); font-size: .9em; margin: 6px 0; }
+  .chk input { width: auto; }
+  footer.credit { margin: 4px 16px 22px; padding-top: 12px; border-top: 1px solid var(--line);
+                  color: var(--muted); font-size: .85em; max-width: 1100px; }
+  footer.credit p { margin: 0 0 8px; }
+  footer.credit a { color: inherit; }
+</style>
+</head>
+<body>
+<header>
+  <h1>SEG-Y Cropper</h1>
+  <p>Open your SEG-Y volumes, look at inlines, crosslines and time slices, draw a crop, and save cropped SEG-Y files. Everything runs on this computer; nothing is uploaded.</p>
+</header>
+<div class="wrap">
+  <div>
+    <div class="panel">
+      <h2>1 · Files</h2>
+      <input type="file" id="fileIn" multiple accept=".sgy,.segy,.SGY,.SEGY">
+      <div class="row">
+        <div><label for="ilb">Inline byte</label><input type="number" id="ilb" value="189" min="1" max="237"></div>
+        <div><label for="xlb">Crossline byte</label><input type="number" id="xlb" value="193" min="1" max="237"></div>
+      </div>
+      <p class="muted">Changing a byte location re-reads the files. All files should be on the same grid; the crop is given in inline, crossline and time numbers and applied to each file.</p>
+      <ul class="files" id="fileList"></ul>
+      <div class="bar"><i id="prog"></i></div>
+      <div class="muted note" id="status">Choose one or more SEG-Y files.</div>
+    </div>
+
+    <div class="panel">
+      <h2>2 · Crop</h2>
+      <p class="muted">Drag a box on the view to set two of the ranges, or type them.</p>
+      <div class="row3"><span>Inline</span><input type="number" id="il0"><input type="number" id="il1"></div>
+      <div class="row3"><span>Crossline</span><input type="number" id="xl0"><input type="number" id="xl1"></div>
+      <div class="row3"><span>Time (ms)</span><input type="number" id="t0"><input type="number" id="t1"></div>
+      <label class="chk"><input type="checkbox" id="zoom"> Show the cropped area only</label>
+      <button id="resetCrop">Reset to the full volume</button>
+      <div class="note size" id="sizeOut"></div>
+      <div class="row" style="margin-top:6px">
+        <div><label for="target">Target per file (MB)</label><input type="number" id="target" value="30" min="1"></div>
+        <div></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>3 · Save</h2>
+      <label for="suffix">Add to file names</label>
+      <input type="text" id="suffix" value="_crop" style="width:100%;padding:5px 7px;border:1px solid var(--line);border-radius:5px;background:var(--input);color:var(--fg);font:inherit">
+      <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="primary" id="saveBtn" disabled>Save cropped files</button>
+      </div>
+      <p class="muted" id="saveNote">Headers are copied from each input; the sample count and start time are updated. Samples are copied byte for byte (same format as the input).</p>
+      <div class="muted" id="saveOut"></div>
+    </div>
+  </div>
+
+  <div class="viewer">
+    <div class="panel">
+      <div class="vhead">
+        <div class="seg" id="viewSeg">
+          <button data-v="inline" class="on">Inline</button>
+          <button data-v="xline">Crossline</button>
+          <button data-v="time">Time slice</button>
+        </div>
+        <input type="range" id="pos" min="0" max="0" value="0">
+        <span id="posLabel"></span>
+      </div>
+      <div class="vhead">
+        <label class="chk" style="margin:0">Colours
+          <select id="cmap" style="width:auto">
+            <option value="gray">Grey</option>
+            <option value="seismic">Red–white–blue</option>
+            <option value="viridis">Viridis</option>
+          </select></label>
+        <label class="chk" style="margin:0">Clip %
+          <input type="number" id="clip" value="99" min="50" max="100" step="0.5" style="width:80px"></label>
+        <span class="muted" id="viewNote"></span>
+      </div>
+      <canvas id="cv" height="560"></canvas>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+// ───────────────────────── SEG-Y reading ─────────────────────────
+const BPS = {1: 4, 2: 4, 3: 2, 5: 4, 8: 1, 6: 8};
+const IBM_EXP = new Float64Array(128);
+for (let e = 0; e < 128; e++) IBM_EXP[e] = Math.pow(16, e - 64);
+const PREVIEW_FLOATS = window.__previewFloats || 40e6;           // preview cube budget (≈160 MB)
+const CHUNK = 24 * 1024 * 1024;        // bytes read at a time
+
+function sampleReader(fmt, le) {
+  switch (fmt) {
+    case 1: return (dv, o) => {
+      const u = dv.getUint32(o, le); const f = u & 0xffffff;
+      if (!f) return 0;
+      const v = f / 16777216 * IBM_EXP[(u >>> 24) & 0x7f];
+      return (u >>> 31) ? -v : v; };
+    case 5: return (dv, o) => dv.getFloat32(o, le);
+    case 2: return (dv, o) => dv.getInt32(o, le);
+    case 3: return (dv, o) => dv.getInt16(o, le);
+    case 8: return (dv, o) => dv.getInt8(o);
+    case 6: return (dv, o) => dv.getFloat64(o, le);
+  }
+  throw new Error('Unsupported sample format ' + fmt);
+}
+
+async function readHeader(file) {
+  const buf = await file.slice(0, 3600).arrayBuffer();
+  const dv = new DataView(buf);
+  let le = false;
+  let fmt = dv.getInt16(3224, false);
+  if (!(fmt in BPS)) {
+    const fl = dv.getInt16(3224, true);
+    if (fl in BPS) { le = true; fmt = fl; }
+    else throw new Error(`${file.name}: unknown sample format code (${fmt})`);
+  }
+  const dt = dv.getUint16(3216, le);
+  let ns = dv.getUint16(3220, le);
+  let ext = dv.getInt16(3504, le);
+  if (ext < 0 || ext > 100) ext = 0;
+  const dataStart = 3600 + 3200 * ext;
+  const th = new DataView(await file.slice(dataStart, dataStart + 240).arrayBuffer());
+  const nsT = th.getUint16(114, le);
+  if (!ns) ns = nsT;
+  const delay = th.getInt16(108, le);
+  const bps = BPS[fmt];
+  const traceLen = 240 + ns * bps;
+  const ntrF = (file.size - dataStart) / traceLen;
+  if (!ns || !dt) throw new Error(`${file.name}: missing sample count or interval`);
+  if (Math.abs(ntrF - Math.round(ntrF)) > 1e-9)
+    throw new Error(`${file.name}: file size does not fit ${ns} samples per trace (variable trace length is not supported)`);
+  return {le, fmt, dt, ns, ext, dataStart, bps, traceLen, ntr: Math.round(ntrF), delay};
+}
+
+// Scan every trace header (and optionally a time-decimated preview cube).
+async function scanFile(entry, withPreview, onProg, token) {
+  const f = entry.file, H = entry.h;
+  const il = new Int32Array(H.ntr), xl = new Int32Array(H.ntr);
+  const ilo = state.ilb - 1, xlo = state.xlb - 1;
+  let dec = 1, nsd = H.ns, prev = null;
+  if (withPreview) {
+    dec = Math.max(1, Math.ceil(H.ntr * H.ns / PREVIEW_FLOATS));
+    nsd = Math.ceil(H.ns / dec);
+    prev = new Float32Array(H.ntr * nsd);
+  }
+  const rd = sampleReader(H.fmt, H.le);
+  const per = Math.max(1, Math.floor(CHUNK / H.traceLen));
+  for (let t0 = 0; t0 < H.ntr; t0 += per) {
+    if (token && token.cancel) return null;
+    const n = Math.min(per, H.ntr - t0);
+    const off = H.dataStart + t0 * H.traceLen;
+    const dv = new DataView(await f.slice(off, off + n * H.traceLen).arrayBuffer());
+    for (let k = 0; k < n; k++) {
+      const b = k * H.traceLen;
+      il[t0 + k] = dv.getInt32(b + ilo, H.le);
+      xl[t0 + k] = dv.getInt32(b + xlo, H.le);
+      if (prev) {
+        const s0 = b + 240, p0 = (t0 + k) * nsd;
+        for (let j = 0, s = 0; s < H.ns; j++, s += dec) prev[p0 + j] = rd(dv, s0 + s * H.bps);
+      }
+    }
+    onProg && onProg((t0 + n) / H.ntr);
+  }
+  // grid
+  const uil = Array.from(new Set(il)).sort((a, b) => a - b);
+  const uxl = Array.from(new Set(xl)).sort((a, b) => a - b);
+  const mil = new Map(uil.map((v, i) => [v, i])), mxl = new Map(uxl.map((v, i) => [v, i]));
+  const nil = uil.length, nxl = uxl.length;
+  const grid = new Int32Array(nil * nxl).fill(-1);
+  let dup = 0;
+  for (let t = 0; t < H.ntr; t++) {
+    const g = mil.get(il[t]) * nxl + mxl.get(xl[t]);
+    if (grid[g] < 0) grid[g] = t; else dup++;
+  }
+  return {il, xl, uil, uxl, nil, nxl, grid, dup, dec, nsd, prev};
+}
+
+// Read full traces (by trace number) — contiguous runs are read in one go.
+async function readTraces(entry, trs) {
+  const H = entry.h, rd = sampleReader(H.fmt, H.le);
+  const out = new Map();
+  const sorted = trs.filter(t => t >= 0).sort((a, b) => a - b);
+  let i = 0;
+  while (i < sorted.length) {
+    let j = i;
+    while (j + 1 < sorted.length && sorted[j + 1] === sorted[j] + 1 && j - i < 4000) j++;
+    const off = H.dataStart + sorted[i] * H.traceLen;
+    const dv = new DataView(await entry.file.slice(off, off + (j - i + 1) * H.traceLen).arrayBuffer());
+    for (let k = i; k <= j; k++) {
+      const b = (k - i) * H.traceLen + 240, a = new Float32Array(H.ns);
+      for (let s = 0; s < H.ns; s++) a[s] = rd(dv, b + s * H.bps);
+      out.set(sorted[k], a);
+    }
+    i = j + 1;
+  }
+  return out;
+}
+
+// One exact sample per trace (time slice), streaming the whole file.
+async function readTimeSlice(entry, s, token) {
+  const H = entry.h, rd = sampleReader(H.fmt, H.le);
+  const v = new Float32Array(H.ntr);
+  const per = Math.max(1, Math.floor(CHUNK / H.traceLen));
+  for (let t0 = 0; t0 < H.ntr; t0 += per) {
+    if (token.cancel) return null;
+    const n = Math.min(per, H.ntr - t0);
+    const off = H.dataStart + t0 * H.traceLen;
+    const dv = new DataView(await entry.file.slice(off, off + n * H.traceLen).arrayBuffer());
+    for (let k = 0; k < n; k++) v[t0 + k] = rd(dv, k * H.traceLen + 240 + s * H.bps);
+  }
+  return v;
+}
+
+// ───────────────────────── state ─────────────────────────
+const $ = id => document.getElementById(id);
+const state = {
+  files: [], active: -1, ilb: 189, xlb: 193, view: 'inline',
+  pos: {inline: 0, xline: 0, time: 0}, crop: null, img: null, busy: false,
+};
+let scanToken = null, viewToken = {cancel: false}, sliceTimer = null;
+
+function setStatus(t, cls) { const e = $('status'); e.textContent = t; e.className = 'muted note ' + (cls || ''); }
+function setProg(f) { $('prog').style.width = (100 * Math.max(0, Math.min(1, f))) + '%'; }
+function act() { return state.files[state.active]; }
+function tms(H, s) { return H.delay + s * H.dt / 1000; }
+
+$('fileIn').addEventListener('change', async e => {
+  const fs = Array.from(e.target.files || []);
+  if (!fs.length) return;
+  for (const f of fs) {
+    try {
+      const h = await readHeader(f);
+      state.files.push({file: f, name: f.name, h, g: null, include: true});
+    } catch (err) { setStatus(err.message, 'bad'); }
+  }
+  e.target.value = '';
+  if (state.active < 0 && state.files.length) state.active = 0;
+  await rescanAll();
+});
+for (const id of ['ilb', 'xlb']) $(id).addEventListener('change', async () => {
+  state.ilb = +$('ilb').value; state.xlb = +$('xlb').value;
+  state.files.forEach(f => { f.g = null; });
+  await rescanAll();
+});
+
+async function rescanAll() {
+  if (scanToken) scanToken.cancel = true;
+  const token = scanToken = {cancel: false};
+  state.busy = true; renderFiles();
+  const order = [state.active, ...state.files.map((_, i) => i).filter(i => i !== state.active)];
+  for (const i of order) {
+    const F = state.files[i];
+    if (!F || (F.g && (i !== state.active || F.g.prev))) continue;
+    setStatus(`Reading headers of ${F.name}…`);
+    const t = performance.now();
+    const g = await scanFile(F, i === state.active, setProg, token);
+    if (!g) return;
+    F.g = g;
+    setStatus(`${F.name}: read in ${((performance.now() - t) / 1000).toFixed(1)} s`);
+    renderFiles();
+    if (i === state.active) { initCrop(false); setupView(); }
+  }
+  state.busy = false; setProg(0);
+  checkGrids(); renderFiles(); updateSize();
+}
+
+async function setActive(i) {
+  if (i === state.active) return;
+  const old = act(); if (old && old.g) old.g.prev = null;     // free the old preview
+  state.active = i;
+  if (state.files[i].g && !state.files[i].g.prev) state.files[i].g = null;
+  await rescanAll();
+}
+
+function checkGrids() {
+  const A = act(); if (!A || !A.g) return;
+  const bad = state.files.filter(F => F.g && (F.g.nil !== A.g.nil || F.g.nxl !== A.g.nxl ||
+    F.h.ns !== A.h.ns || F.h.dt !== A.h.dt || F.g.uil[0] !== A.g.uil[0] || F.g.uxl[0] !== A.g.uxl[0]));
+  if (bad.length) setStatus('Not on the same grid as ' + A.name + ': ' + bad.map(b => b.name).join(', ') +
+    '. The crop still applies by inline / crossline / time number.', 'warn');
+}
+
+function renderFiles() {
+  const ul = $('fileList'); ul.innerHTML = '';
+  state.files.forEach((F, i) => {
+    const li = document.createElement('li');
+    if (i === state.active) li.className = 'active';
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = F.include;
+    cb.title = 'Include when saving'; cb.onchange = () => { F.include = cb.checked; updateSize(); };
+    const nm = document.createElement('span'); nm.textContent = F.name; nm.style.cursor = 'pointer';
+    nm.title = 'Show this file'; nm.onclick = () => setActive(i);
+    const st = document.createElement('span'); st.className = 'st';
+    const H = F.h;
+    st.textContent = F.g ? `${F.g.nil}×${F.g.nxl}×${H.ns} · ${(F.file.size / 1e6).toFixed(0)} MB`
+      : `${(F.file.size / 1e6).toFixed(0)} MB · reading…`;
+    const rm = document.createElement('button'); rm.textContent = '✕'; rm.title = 'Remove';
+    rm.style.padding = '0 6px';
+    rm.onclick = () => {
+      const wasActive = i === state.active;
+      state.files.splice(i, 1);
+      if (i < state.active) state.active--;
+      if (state.active >= state.files.length) state.active = state.files.length - 1;
+      if (wasActive && act()) act().g = null;          // needs a preview read
+      if (!state.files.length) { state.img = null; state.crop = null; $('cv').getContext('2d').clearRect(0, 0, 1e4, 1e4); }
+      rescanAll();
+    };
+    li.append(cb, nm, st, rm); ul.append(li);
+  });
+  $('saveBtn').disabled = state.busy || !state.files.some(F => F.include && F.g) || !state.crop;
+  const A = act();
+  if (A && A.g) {
+    const H = A.h, g = A.g;
+    $('viewNote').textContent = `${A.name}: inlines ${g.uil[0]}–${g.uil[g.nil - 1]} (${g.nil}) · crosslines ${g.uxl[0]}–${g.uxl[g.nxl - 1]} (${g.nxl}) · ${H.ns} samples at ${H.dt / 1000} ms from ${H.delay} ms · format ${H.fmt}${H.le ? ' (little-endian)' : ''} · ${H.ntr.toLocaleString()} traces` + (g.dup ? ` · ${g.dup} duplicate positions` : '');
+    if (g.nil <= 1 || g.nxl <= 1 || H.ntr < 0.5 * g.nil * g.nxl)
+      setStatus('The grid looks wrong (one inline or crossline, or mostly empty) — check the byte locations.', 'warn');
+  }
+}
+
+// ───────────────────────── crop ─────────────────────────
+function initCrop(force) {
+  const A = act(); if (!A || !A.g) return;
+  if (state.crop && !force) { clampCrop(); writeCrop(); return; }
+  const g = A.g, H = A.h;
+  state.crop = {il0: g.uil[0], il1: g.uil[g.nil - 1], xl0: g.uxl[0], xl1: g.uxl[g.nxl - 1],
+                t0: tms(H, 0), t1: tms(H, H.ns - 1)};
+  writeCrop();
+}
+function snapT(v) { const H = act().h; const s = Math.round((v - H.delay) * 1000 / H.dt);
+  return tms(H, Math.max(0, Math.min(H.ns - 1, s))); }
+function snapList(list, v) { let b = list[0]; for (const x of list) if (Math.abs(x - v) < Math.abs(b - v)) b = x; return b; }
+function clampCrop() {
+  const A = act(), g = A.g, c = state.crop;
+  c.il0 = snapList(g.uil, Math.min(c.il0, c.il1)); c.il1 = snapList(g.uil, Math.max(c.il0, c.il1));
+  c.xl0 = snapList(g.uxl, Math.min(c.xl0, c.xl1)); c.xl1 = snapList(g.uxl, Math.max(c.xl0, c.xl1));
+  const a = snapT(Math.min(c.t0, c.t1)), b = snapT(Math.max(c.t0, c.t1)); c.t0 = a; c.t1 = b;
+}
+function writeCrop() {
+  const c = state.crop;
+  for (const k of ['il0', 'il1', 'xl0', 'xl1', 't0', 't1']) $(k).value = +c[k].toFixed(3);
+  updateSize();
+}
+for (const k of ['il0', 'il1', 'xl0', 'xl1', 't0', 't1']) $(k).addEventListener('change', () => {
+  if (!state.crop) return; state.crop[k] = +$(k).value; clampCrop(); writeCrop(); draw();
+});
+$('resetCrop').onclick = () => { initCrop(true); draw(); };
+$('zoom').onchange = () => { setupView(); };
+$('target').onchange = updateSize;
+
+function cropCounts(F) {
+  const g = F.g, c = state.crop, H = F.h;
+  let n = 0;
+  for (let i = 0; i < g.nil; i++) {
+    const v = g.uil[i]; if (v < c.il0 || v > c.il1) continue;
+    for (let j = 0; j < g.nxl; j++) {
+      const w = g.uxl[j]; if (w < c.xl0 || w > c.xl1) continue;
+      if (g.grid[i * g.nxl + j] >= 0) n++;
+    }
+  }
+  const s0 = Math.max(0, Math.round((c.t0 - H.delay) * 1000 / H.dt));
+  const s1 = Math.min(H.ns - 1, Math.round((c.t1 - H.delay) * 1000 / H.dt));
+  return {n, s0, s1, nsC: s1 - s0 + 1,
+          bytes: H.dataStart + n * (240 + (s1 - s0 + 1) * H.bps)};
+}
+function updateSize() {
+  const el = $('sizeOut');
+  const fs = state.files.filter(F => F.include && F.g);
+  if (!state.crop || !fs.length) { el.textContent = ''; renderFiles(); return; }
+  const r = cropCounts(fs[0]);
+  const tot = fs.reduce((a, F) => a + cropCounts(F).bytes, 0);
+  const mb = r.bytes / 1e6, tgt = +$('target').value;
+  const c = state.crop;
+  const nil = act().g.uil.filter(v => v >= c.il0 && v <= c.il1).length;
+  const nxl = act().g.uxl.filter(v => v >= c.xl0 && v <= c.xl1).length;
+  el.innerHTML = `Crop: ${nil} inlines × ${nxl} crosslines × ${r.nsC} samples<br>` +
+    `<span class="${mb <= tgt ? 'ok' : 'warn'}">${mb.toFixed(1)} MB per file</span> · ` +
+    `${(tot / 1e6).toFixed(1)} MB for ${fs.length} file${fs.length > 1 ? 's' : ''}` +
+    (mb > tgt ? `<br><span class="muted">About ${(mb / tgt).toFixed(1)}× over the target.</span>` : '');
+  renderFiles();
+}
+
+// ───────────────────────── view ─────────────────────────
+for (const b of document.querySelectorAll('#viewSeg button')) b.onclick = () => {
+  state.view = b.dataset.v;
+  document.querySelectorAll('#viewSeg button').forEach(x => x.classList.toggle('on', x === b));
+  setupView();
+};
+$('pos').addEventListener('input', () => { state.pos[state.view] = +$('pos').value; showPosLabel(); loadView(); });
+$('cmap').onchange = () => { state.img && paint(); };
+$('clip').onchange = () => { state.img && (state.img.clip = null, paint()); };
+
+function axisList() {         // values along the slider for the current view
+  const A = act(), g = A.g, H = A.h, c = state.crop, z = $('zoom').checked && c;
+  if (state.view === 'inline') return g.uil.map((v, i) => [i, v]).filter(([, v]) => !z || (v >= c.il0 && v <= c.il1));
+  if (state.view === 'xline') return g.uxl.map((v, i) => [i, v]).filter(([, v]) => !z || (v >= c.xl0 && v <= c.xl1));
+  const out = []; for (let s = 0; s < H.ns; s++) { const t = tms(H, s); if (!z || (t >= c.t0 - 1e-6 && t <= c.t1 + 1e-6)) out.push([s, t]); }
+  return out;
+}
+function setupView() {
+  const A = act(); if (!A || !A.g) return;
+  const L = axisList(); state.axis = L;
+  const cur = state.pos[state.view];
+  let k = L.findIndex(([i]) => i === cur); if (k < 0) k = Math.floor(L.length / 2);
+  $('pos').max = Math.max(0, L.length - 1); $('pos').value = k;
+  state.pos[state.view] = L[k] ? L[k][0] : 0;
+  showPosLabel(); loadView();
+}
+function showPosLabel() {
+  const L = state.axis || []; const k = +$('pos').value; const e = L[k]; if (!e) return;
+  state.pos[state.view] = e[0];
+  $('posLabel').textContent = state.view === 'inline' ? `Inline ${e[1]}` : state.view === 'xline' ? `Crossline ${e[1]}` : `${+e[1].toFixed(2)} ms`;
+}
+
+async function loadView() {
+  const A = act(); if (!A || !A.g) return;
+  viewToken.cancel = true; const token = viewToken = {cancel: false};
+  clearTimeout(sliceTimer);
+  const g = A.g, H = A.h, p = state.pos[state.view];
+  if (state.view === 'time') {
+    // preview from the decimated cube at once, exact slice shortly after
+    const k = Math.min(g.nsd - 1, Math.round(p / g.dec));
+    const img = new Float32Array(g.nil * g.nxl).fill(NaN);
+    for (let i = 0; i < g.grid.length; i++) { const t = g.grid[i]; if (t >= 0) img[i] = g.prev[t * g.nsd + k]; }
+    state.img = {data: img, w: g.nxl, h: g.nil, kind: 'time', exact: g.dec === 1};
+    paint();
+    if (g.dec > 1) sliceTimer = setTimeout(async () => {
+      const v = await readTimeSlice(A, p, token); if (!v || token.cancel) return;
+      const im = new Float32Array(g.nil * g.nxl).fill(NaN);
+      for (let i = 0; i < g.grid.length; i++) { const t = g.grid[i]; if (t >= 0) im[i] = v[t]; }
+      state.img = {data: im, w: g.nxl, h: g.nil, kind: 'time', exact: true, clip: state.img && state.img.clip};
+      paint();
+    }, 450);
+    return;
+  }
+  const trs = [];
+  if (state.view === 'inline') for (let j = 0; j < g.nxl; j++) trs.push(g.grid[p * g.nxl + j]);
+  else for (let i = 0; i < g.nil; i++) trs.push(g.grid[i * g.nxl + p]);
+  const tr = await readTraces(A, trs);
+  if (token.cancel) return;
+  const w = trs.length, img = new Float32Array(w * H.ns).fill(NaN);
+  trs.forEach((t, x) => { const a = tr.get(t); if (a) for (let s = 0; s < H.ns; s++) img[s * w + x] = a[s]; });
+  state.img = {data: img, w, h: H.ns, kind: state.view, exact: true};
+  paint();
+}
+
+// colour maps
+const CMAPS = {
+  gray: [[0, 0, 0], [255, 255, 255]],
+  seismic: [[178, 24, 43], [255, 255, 255], [33, 102, 172]],
+  viridis: [[68, 1, 84], [59, 82, 139], [33, 145, 140], [94, 201, 98], [253, 231, 37]],
+};
+function lut(name) {
+  const st = CMAPS[name], out = new Uint8ClampedArray(256 * 3);
+  for (let i = 0; i < 256; i++) {
+    const f = i / 255 * (st.length - 1), a = Math.min(st.length - 2, Math.floor(f)), r = f - a;
+    for (let c = 0; c < 3; c++) out[i * 3 + c] = st[a][c] + (st[a + 1][c] - st[a][c]) * r;
+  }
+  return out;
+}
+function clipRange(data, pct, sym) {
+  const n = data.length, step = Math.max(1, Math.floor(n / 200000)), v = [];
+  for (let i = 0; i < n; i += step) { const x = data[i]; if (Number.isFinite(x)) v.push(sym ? Math.abs(x) : x); }
+  if (!v.length) return [0, 1];
+  v.sort((a, b) => a - b);
+  const q = p => v[Math.min(v.length - 1, Math.max(0, Math.floor(p / 100 * (v.length - 1))))];
+  if (sym) { const m = q(pct) || 1; return [-m, m]; }
+  const lo = q(100 - pct), hi = q(pct); return [lo, hi > lo ? hi : lo + 1];
+}
+
+const MARG = {l: 64, r: 12, t: 12, b: 40};
+function viewGeom() {
+  // data extents of the current image along x and y (in grid index units) and the zoom window
+  const A = act(), g = A.g, H = A.h, im = state.img, c = state.crop, z = $('zoom').checked && c;
+  let xs = [0, im.w - 1], ys = [0, im.h - 1];
+  if (z) {
+    const ilI = [g.uil.indexOf(c.il0), g.uil.indexOf(c.il1)], xlI = [g.uxl.indexOf(c.xl0), g.uxl.indexOf(c.xl1)];
+    const tI = [Math.round((c.t0 - H.delay) * 1000 / H.dt), Math.round((c.t1 - H.delay) * 1000 / H.dt)];
+    if (im.kind === 'inline') { xs = xlI; ys = tI; }
+    else if (im.kind === 'xline') { xs = ilI; ys = tI; }
+    else { xs = xlI; ys = ilI; }
+  }
+  return {xs, ys};
+}
+function paint() {
+  const A = act(); const im = state.img; if (!A || !im) return;
+  const cv = $('cv'), dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth, Hh = Math.max(380, Math.min(720, Math.round(W * (im.kind === 'time' ? 0.62 : 0.55))));
+  cv.style.height = Hh + 'px'; cv.width = W * dpr; cv.height = Hh * dpr;
+  const ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const css = getComputedStyle(document.documentElement);
+  ctx.fillStyle = css.getPropertyValue('--panel'); ctx.fillRect(0, 0, W, Hh);
+  const cm = $('cmap').value, sym = cm === 'seismic';
+  if (!im.clip || im.clip.cm !== cm) im.clip = {r: clipRange(im.data, +$('clip').value, sym), cm};
+  const [lo, hi] = im.clip.r, L = lut(cm);
+  const {xs, ys} = viewGeom();
+  const x0 = Math.max(0, Math.min(xs[0], xs[1])), x1 = Math.min(im.w - 1, Math.max(xs[0], xs[1]));
+  const y0 = Math.max(0, Math.min(ys[0], ys[1])), y1 = Math.min(im.h - 1, Math.max(ys[0], ys[1]));
+  const w = x1 - x0 + 1, h = y1 - y0 + 1;
+  const off = document.createElement('canvas'); off.width = w; off.height = h;
+  const oc = off.getContext('2d'), id = oc.createImageData(w, h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const v = im.data[(y + y0) * im.w + (x + x0)], o = (y * w + x) * 4;
+    if (!Number.isFinite(v)) { id.data[o + 3] = 0; continue; }
+    const k = Math.max(0, Math.min(255, Math.round((v - lo) / (hi - lo) * 255)));
+    id.data[o] = L[k * 3]; id.data[o + 1] = L[k * 3 + 1]; id.data[o + 2] = L[k * 3 + 2]; id.data[o + 3] = 255;
+  }
+  oc.putImageData(id, 0, 0);
+  const pw = W - MARG.l - MARG.r, ph = Hh - MARG.t - MARG.b;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(off, MARG.l, MARG.t, pw, ph);
+  state.frame = {x0, x1, y0, y1, pw, ph};
+  // axes
+  const g = A.g, H = A.h;
+  const xv = i => im.kind === 'xline' ? g.uil[i] : g.uxl[i];
+  const yv = i => im.kind === 'time' ? g.uil[i] : tms(H, i);
+  ctx.fillStyle = css.getPropertyValue('--muted'); ctx.strokeStyle = css.getPropertyValue('--line');
+  ctx.font = '12px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  const nt = 6;
+  for (let k = 0; k <= nt; k++) {
+    const i = Math.round(x0 + (x1 - x0) * k / nt), px = MARG.l + (i - x0 + 0.5) / w * pw;
+    ctx.fillText(String(+(+xv(i)).toFixed(1)), px, MARG.t + ph + 4);
+  }
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  for (let k = 0; k <= nt; k++) {
+    const i = Math.round(y0 + (y1 - y0) * k / nt), py = MARG.t + (i - y0 + 0.5) / h * ph;
+    ctx.fillText(String(+(+yv(i)).toFixed(1)), MARG.l - 6, py);
+  }
+  ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+  ctx.fillText(im.kind === 'xline' ? 'Inline' : 'Crossline', MARG.l + pw / 2, Hh - 2);
+  ctx.save(); ctx.translate(14, MARG.t + ph / 2); ctx.rotate(-Math.PI / 2); ctx.textBaseline = 'middle';
+  ctx.fillText(im.kind === 'time' ? 'Inline' : 'Time (ms)', 0, 0); ctx.restore();
+  if (im.kind === 'time' && !im.exact) {
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillStyle = css.getPropertyValue('--warn');
+    ctx.fillText('preview (nearest stored sample) — exact slice loading…', MARG.l + 6, MARG.t + 4);
+  }
+  drawCrop(ctx);
+}
+function cropRectIdx() {         // crop box in image index units for the current view
+  const A = act(), g = A.g, H = A.h, c = state.crop, im = state.img;
+  if (!c) return null;
+  const il = [g.uil.indexOf(c.il0), g.uil.indexOf(c.il1)], xl = [g.uxl.indexOf(c.xl0), g.uxl.indexOf(c.xl1)];
+  const t = [Math.round((c.t0 - H.delay) * 1000 / H.dt), Math.round((c.t1 - H.delay) * 1000 / H.dt)];
+  if (im.kind === 'inline') return {x: xl, y: t};
+  if (im.kind === 'xline') return {x: il, y: t};
+  return {x: xl, y: il};
+}
+function idxToPx(ix, iy) {
+  const f = state.frame;
+  return [MARG.l + (ix - f.x0) / (f.x1 - f.x0 + 1) * f.pw, MARG.t + (iy - f.y0) / (f.y1 - f.y0 + 1) * f.ph];
+}
+function pxToIdx(px, py) {
+  const f = state.frame;
+  return [f.x0 + (px - MARG.l) / f.pw * (f.x1 - f.x0 + 1), f.y0 + (py - MARG.t) / f.ph * (f.y1 - f.y0 + 1)];
+}
+function drawCrop(ctx, drag) {
+  const r = drag || cropRectIdx(); if (!r) return;
+  const css = getComputedStyle(document.documentElement);
+  const [ax, ay] = idxToPx(Math.min(...r.x), Math.min(...r.y));
+  const [bx, by] = idxToPx(Math.max(...r.x) + 1, Math.max(...r.y) + 1);
+  const f = state.frame;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath(); ctx.rect(MARG.l, MARG.t, f.pw, f.ph); ctx.rect(ax, ay, bx - ax, by - ay); ctx.fill('evenodd');
+  ctx.strokeStyle = css.getPropertyValue('--crop'); ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+  ctx.strokeRect(ax, ay, bx - ax, by - ay); ctx.restore();
+}
+
+// drag to set the crop in the two dimensions of the current view
+let dragStart = null;
+const cvEl = $('cv');
+cvEl.addEventListener('pointerdown', e => {
+  if (!state.img || !state.frame) return;
+  const r = cvEl.getBoundingClientRect(); dragStart = pxToIdx(e.clientX - r.left, e.clientY - r.top);
+  cvEl.setPointerCapture(e.pointerId);
+});
+cvEl.addEventListener('pointermove', e => {
+  if (!dragStart) return;
+  const r = cvEl.getBoundingClientRect(), p = pxToIdx(e.clientX - r.left, e.clientY - r.top);
+  paint(); const ctx = cvEl.getContext('2d');
+  drawCrop(ctx, {x: [Math.floor(dragStart[0]), Math.floor(p[0])], y: [Math.floor(dragStart[1]), Math.floor(p[1])]});
+});
+cvEl.addEventListener('pointerup', e => {
+  if (!dragStart) return;
+  const r = cvEl.getBoundingClientRect(), p = pxToIdx(e.clientX - r.left, e.clientY - r.top);
+  const a = dragStart; dragStart = null;
+  if (Math.abs(p[0] - a[0]) < 1 && Math.abs(p[1] - a[1]) < 1) { paint(); return; }
+  const A = act(), g = A.g, H = A.h, im = state.img, c = state.crop;
+  const cl = (v, n) => Math.max(0, Math.min(n - 1, Math.floor(v)));
+  const xi = [cl(a[0], im.w), cl(p[0], im.w)].sort((u, v) => u - v);
+  const yi = [cl(a[1], im.h), cl(p[1], im.h)].sort((u, v) => u - v);
+  if (im.kind === 'inline') { c.xl0 = g.uxl[xi[0]]; c.xl1 = g.uxl[xi[1]]; c.t0 = tms(H, yi[0]); c.t1 = tms(H, yi[1]); }
+  else if (im.kind === 'xline') { c.il0 = g.uil[xi[0]]; c.il1 = g.uil[xi[1]]; c.t0 = tms(H, yi[0]); c.t1 = tms(H, yi[1]); }
+  else { c.xl0 = g.uxl[xi[0]]; c.xl1 = g.uxl[xi[1]]; c.il0 = g.uil[yi[0]]; c.il1 = g.uil[yi[1]]; }
+  clampCrop(); writeCrop();
+  if ($('zoom').checked) setupView(); else paint();
+});
+function draw() { if (state.img) paint(); }
+window.addEventListener('resize', draw);
+
+// ───────────────────────── save ─────────────────────────
+async function buildCrop(F, onProg) {
+  const H = F.h, g = F.g, c = state.crop, r = cropCounts(F);
+  const out = new Uint8Array(r.bytes);
+  const head = new Uint8Array(await F.file.slice(0, H.dataStart).arrayBuffer());
+  out.set(head, 0);
+  const odv = new DataView(out.buffer);
+  odv.setUint16(3220, r.nsC, H.le);                         // samples per trace (binary header)
+  const keep = new Uint8Array(H.ntr);
+  for (let t = 0; t < H.ntr; t++) {
+    const a = g.il[t], b = g.xl[t];
+    if (a >= c.il0 && a <= c.il1 && b >= c.xl0 && b <= c.xl1) keep[t] = 1;
+  }
+  // duplicate positions: keep only the first trace (as in the view / size count)
+  const first = new Uint8Array(H.ntr); for (const t of g.grid) if (t >= 0) first[t] = 1;
+  let w = H.dataStart, written = 0;
+  const per = Math.max(1, Math.floor(CHUNK / H.traceLen));
+  const sB = r.s0 * H.bps, nB = r.nsC * H.bps, dShift = r.s0 * H.dt / 1000;
+  for (let t0 = 0; t0 < H.ntr; t0 += per) {
+    const n = Math.min(per, H.ntr - t0);
+    let any = false; for (let k = 0; k < n; k++) if (keep[t0 + k] && first[t0 + k]) { any = true; break; }
+    if (!any) { onProg((t0 + n) / H.ntr); continue; }
+    const off = H.dataStart + t0 * H.traceLen;
+    const buf = new Uint8Array(await F.file.slice(off, off + n * H.traceLen).arrayBuffer());
+    for (let k = 0; k < n; k++) {
+      if (!keep[t0 + k] || !first[t0 + k]) continue;
+      const b = k * H.traceLen;
+      out.set(buf.subarray(b, b + 240), w);
+      odv.setUint16(w + 114, r.nsC, H.le);                   // samples in this trace
+      odv.setInt16(w + 108, Math.round(odv.getInt16(w + 108, H.le) + dShift), H.le);   // delay recording time
+      out.set(buf.subarray(b + 240 + sB, b + 240 + sB + nB), w + 240);
+      w += 240 + nB; written++;
+    }
+    onProg((t0 + n) / H.ntr);
+  }
+  if (w !== out.length) throw new Error(`${F.name}: size mismatch (${w} vs ${out.length})`);
+  return {out, written, frac: Math.abs(dShift - Math.round(dShift)) > 1e-6};
+}
+function outName(F) {
+  const sfx = $('suffix').value || '_crop', m = F.name.match(/^(.*?)(\.[^.]*)?$/);
+  return m[1] + sfx + (m[2] || '.sgy');
+}
+$('saveBtn').onclick = async () => {
+  const fs = state.files.filter(F => F.include && F.g);
+  if (!fs.length || !state.crop) return;
+  $('saveBtn').disabled = true;
+  let dir = null;
+  if (window.showDirectoryPicker) {
+    try { dir = await window.showDirectoryPicker({mode: 'readwrite'}); }
+    catch (e) { if (e.name === 'AbortError') { $('saveBtn').disabled = false; return; } dir = null; }
+  }
+  const msgs = [];
+  for (const [i, F] of fs.entries()) {
+    setStatus(`Cropping ${F.name} (${i + 1} of ${fs.length})…`);
+    try {
+      if (!F.g.il) throw new Error('not read');
+      const {out, written, frac} = await buildCrop(F, setProg);
+      const nm = outName(F);
+      if (dir) {
+        const fh = await dir.getFileHandle(nm, {create: true});
+        const ws = await fh.createWritable(); await ws.write(out); await ws.close();
+      } else {
+        const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([out], {type: 'application/octet-stream'}));
+        a.download = nm; document.body.append(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+        await new Promise(r => setTimeout(r, 700));
+      }
+      msgs.push(`✓ ${nm}: ${written.toLocaleString()} traces, ${(out.length / 1e6).toFixed(1)} MB` + (frac ? ' (start time rounded to whole ms in the trace headers)' : ''));
+    } catch (e) { msgs.push(`✕ ${F.name}: ${e.message}`); }
+    $('saveOut').innerHTML = msgs.map(m => `<div>${m.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</div>`).join('');
+  }
+  setProg(0);
+  setStatus(dir ? 'Saved to the folder you chose.' : 'Saved as downloads (check your Downloads folder).', 'ok');
+  $('saveBtn').disabled = false;
+};
+</script>
+<footer class="credit">
+  <p>Built for teaching by Dr. April Moreno-Ward and Dr. Heather Bedle, University of Oklahoma,
+  with the <a href="https://www.ou.edu/mcee/labs/aaspi" rel="noopener noreferrer">AASPI</a> consortium.
+  SEG-Y Cropper, version 1.0.</p>
+  <p><strong>To cite:</strong> A. Moreno-Ward and H. Bedle, 2026, SEG-Y Cropper (version 1.0)
+  [DOI to follow].</p>
+  <p>Free to use, including in teaching and research. If you use it in a course, a talk, or a
+  publication, please credit the tool and link back to it. Licensed
+  <a href="https://creativecommons.org/licenses/by-sa/4.0/" rel="noopener noreferrer">CC BY-SA 4.0</a>.
+  Reads and writes SEG-Y as described in the SEG-Y revision 2.0 standard (SEG, 2017).
+  Colour maps: viridis (van der Walt and Smith, public domain) and a red–white–blue map after
+  ColorBrewer RdBu (Brewer).</p>
+  <p>Your data never leave your computer. The only thing recorded is that the page was opened:
+  no cookie, no account, and no personal information.</p>
+</footer>
+<script src="assets/count.js"></script>
+</body>
+</html>
